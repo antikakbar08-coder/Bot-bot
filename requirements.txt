@@ -1,2 +1,2 @@
+cctx
 requests
-discord-webhook
