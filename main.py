@@ -3,8 +3,8 @@ import time
 
 # --- KONFIGURASI ---
 WEBHOOK_URL = "https://discord.com/api/webhooks/1489799903361372313/vhtfgVrueL8j0ziJB7gwSkTw97gjP4pz5qiajrOsQ_1b7omwWLCraXsFo4l1rlCwsTkX"
-MIN_PROFIT_THRESHOLD = 0.02  # Notif jika harga total < 0.98 (Profit 2%)
-POLL_INTERVAL = 10           # Cek setiap 10 detik
+MIN_PROFIT_THRESHOLD = 0.03  # Notif jika profit > 3%
+JEDA_PER_MARKET = 60         # Jeda 60 detik (1 menit) antar setiap sport
 
 class PolySportsBot:
     def __init__(self):
@@ -12,12 +12,11 @@ class PolySportsBot:
         self.clob_url = "https://clob.polymarket.com/book"
 
     def get_active_sports_markets(self):
-        """Mengambil market olahraga yang sedang aktif (Tag ID 100381 adalah Sports)"""
         params = {
             "active": "true",
             "closed": "false",
-            "tag_id": "100381", # ID umum untuk kategori Sports
-            "limit": 10
+            "tag_id": "100381", # Kategori Sports
+            "limit": 50
         }
         try:
             res = requests.get(self.gamma_url, params=params)
@@ -26,57 +25,62 @@ class PolySportsBot:
             return []
 
     def get_market_price(self, token_id):
-        """Mengambil harga Best Bid (harga jual terbaik saat ini)"""
         try:
             res = requests.get(self.clob_url, params={"token_id": token_id})
             data = res.json()
-            if data['bids']:
+            if data.get('bids') and len(data['bids']) > 0:
                 return float(data['bids'][0]['price'])
             return None
         except:
             return None
 
-    def check_arbitrage(self):
-        print("🔎 Mencari peluang di pasar Sports...")
-        markets = self.get_active_sports_markets()
-        
-        for m in markets:
-            # Polymarket biasanya punya 2 outcome: YES (index 0) dan NO (index 1)
-            # Atau Team A vs Team B
-            outcomes = m.get('clobTokenIds') 
-            if not outcomes or len(outcomes) < 2:
-                continue
-
-            token_yes = eval(outcomes)[0]
-            token_no = eval(outcomes)[1]
-
-            price_yes = self.get_market_price(token_yes)
-            price_no = self.get_market_price(token_no)
-
-            if price_yes and price_no:
-                total_prob = price_yes + price_no
-                print(f"Market: {m['question']} | Total: {total_prob:.3f}")
-
-                # Jika total < 1, berarti ada "Negative Hold" (Peluang Profit)
-                if total_prob < (1.0 - MIN_PROFIT_THRESHOLD):
-                    self.send_alert(m['question'], price_yes, price_no, total_prob)
-
     def send_alert(self, question, p_yes, p_no, total):
         profit = round((1 - total) * 100, 2)
-        payload = {
-            "content": f"🚨 **SPORT ARBITRAGE DETECTED** 🚨\n"
-                       f"🏀 **Event:** {question}\n"
-                       f"✅ YES: {p_yes} | ❌ NO: {p_no}\n"
-                       f"📊 Total Prob: {round(total, 3)}\n"
-                       f"💰 Est. Profit: {profit}%"
-        }
+        # Menambahkan baris kosong (\n\n) agar pesan di Discord memiliki jarak
+        pesan = (
+            f"━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🚨 **SPORT ARBITRAGE DETECTED** 🚨\n\n"
+            f"🏀 **Event:**\n`{question}`\n\n"
+            f"✅ **YES:** `{p_yes}`\n"
+            f"❌ **NO:** `{p_no}`\n\n"
+            f"📊 **Total Prob:** `{round(total, 3)}`\n"
+            f"💰 **Est. Profit:** `{profit}%`\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━"
+        )
+        payload = {"content": pesan}
         requests.post(WEBHOOK_URL, json=payload)
+        print(f"[{time.strftime('%H:%M:%S')}] Notifikasi dikirim untuk: {question[:30]}...")
+
+    def monitor(self):
+        print("Bot mulai berjalan. Mencari peluang...")
+        while True:
+            markets = self.get_active_sports_markets()
+            
+            for m in markets:
+                outcomes = m.get('clobTokenIds')
+                if not outcomes: continue
+                
+                token_ids = eval(outcomes) if isinstance(outcomes, str) else outcomes
+                if len(token_ids) < 2: continue
+
+                price_yes = self.get_market_price(token_ids[0])
+                price_no = self.get_market_price(token_ids[1])
+
+                if price_yes and price_no:
+                    # Filter agar tidak ambil harga sampah 0.001
+                    if price_yes > 0.01 and price_no > 0.01:
+                        total_prob = price_yes + price_no
+                        
+                        if total_prob < (1.0 - MIN_PROFIT_THRESHOLD):
+                            self.send_alert(m['question'], price_yes, price_no, total_prob)
+                            
+                            # JEDA 1 MENIT SETIAP KALI MENEMUKAN PELUANG
+                            print(f"Menunggu {JEDA_PER_MARKET} detik sebelum cek sport berikutnya...")
+                            time.sleep(JEDA_PER_MARKET)
+                
+            print("Scan list selesai, mengulang dari awal...")
+            time.sleep(10)
 
 if __name__ == "__main__":
     bot = PolySportsBot()
-    while True:
-        try:
-            bot.check_arbitrage()
-        except Exception as e:
-            print(f"Error: {e}")
-        time.sleep(POLL_INTERVAL)
+    bot.monitor()
