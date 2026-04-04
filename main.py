@@ -1,52 +1,69 @@
 import requests
 import json
 
-# GANTI DENGAN URL WEBHOOK ANDA
+# URL Webhook yang Anda berikan
 WEBHOOK_URL = "https://discord.com/api/webhooks/1489799903361372313/vhtfgVrueL8j0ziJB7gwSkTw97gjP4pz5qiajrOsQ_1b7omwWLCraXsFo4l1rlCwsTkX"
 
-def send_to_webhook(content):
-    payload = {"content": content}
+def send_to_discord(content):
+    """Mengirim pesan ke Discord dengan format JSON yang benar."""
+    payload = {
+        "username": "Polymarket Sports Bot",
+        "content": content
+    }
+    header = {"Content-Type": "application/json"}
+    
     try:
-        requests.post(WEBHOOK_URL, json=payload)
+        response = requests.post(WEBHOOK_URL, data=json.dumps(payload), headers=header)
+        
+        # Discord memberikan status 204 No Content jika sukses mengirim webhook
+        if response.status_code == 204:
+            print("✅ Berhasil: Pesan telah terkirim ke Discord.")
+        else:
+            print(f"❌ Gagal: Discord merespon dengan status {response.status_code}")
+            print(f"Detail: {response.text}")
     except Exception as e:
-        print(f"Gagal mengirim ke Webhook: {e}")
+        print(f"❌ Error Koneksi: {e}")
 
-def ambil_dan_kirim_data():
+def ambil_data_polymarket():
+    print("Sedang mengambil data dari Polymarket...")
     url = "https://gamma-api.polymarket.com/markets"
-    query_params = {
+    params = {
         "tag": "Sports",
         "active": "true",
         "closed": "false",
-        "limit": 5  # Diambil 5 saja agar tidak spam di chat
+        "limit": 8  # Mengambil 8 pertandingan terbaru
     }
 
     try:
-        response = requests.get(url, params=query_params)
-        data_pasar = response.json()
+        res = requests.get(url, params=params)
+        markets = res.json()
 
-        # Header untuk pesan
-        pesan_notif = "**📊 UPDATE HARGA SPORTS POLYMARKET**\n"
-        pesan_notif += "--------------------------------------------------\n"
+        if not markets:
+            print("Tidak ada data market sports yang ditemukan.")
+            return
 
-        for market in data_pasar:
-            nama = market.get('question', 'Tidak ada nama')
+        # Menyusun pesan untuk Discord
+        pesan = "## 🏆 UPDATE HARGA SPORTS POLYMARKET\n"
+        pesan += "--- \n"
+
+        for m in markets:
+            judul = m.get('question', 'N/A')
             try:
-                prices = json.loads(market.get('outcomePrices', '["0", "0"]'))
-                harga_usd = float(prices[0])
-                persentase = harga_usd * 100
+                # Mengambil harga (outcomePrices dalam format string list)
+                prices = json.loads(m.get('outcomePrices', '["0", "0"]'))
+                harga_yes = float(prices[0])
+                persentase = harga_yes * 100
                 
-                pesan_notif += f"🏆 **{nama}**\n"
-                pesan_notif += f"💰 Harga: `${harga_usd:.2f}` | 📈 Peluang: `{persentase:.1f}%` \n\n"
+                pesan += f"> **{judul}**\n"
+                pesan += f"> Harga: `${harga_yes:.2f}` | Peluang: `{persentase:.1f}%` \n\n"
             except:
                 continue
 
-        # Kirim pesan ke terminal dan webhook
-        print(pesan_notif)
-        send_to_webhook(pesan_notif)
-        print("✅ Notifikasi telah dikirim ke Webhook.")
+        # Kirim ke Discord
+        send_to_discord(pesan)
 
     except Exception as e:
-        print(f"Gagal mengambil data: {e}")
+        print(f"Terjadi kesalahan saat ambil data: {e}")
 
 if __name__ == "__main__":
-    ambil_dan_kirim_data()
+    ambil_data_polymarket()
