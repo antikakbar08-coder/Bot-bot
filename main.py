@@ -4,93 +4,97 @@ import time
 from datetime import datetime
 
 # ================= CONFIGURATION =================
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1489799903361372313/vhtfgVrueL8j0ziJB7gwSkTw97gjP4pz5qiajrOsQ_1b7omwWLCraXsFo4l1rlCwsTkX"
+# GANTI DENGAN WEBHOOK URL ANDA
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/..." 
 BINANCE_URL = "https://fapi.binance.com/fapi/v1/premiumIndex"
-INTERVAL_CEK = 120  # Cek setiap 2 menit (120 detik)
+INTERVAL_CEK = 120  # Cek setiap 120 detik (2 menit)
 # =================================================
 
 def send_to_discord(matches, is_urgent=False):
     now = datetime.now().strftime("%H:%M:%S")
     
     if matches:
-        # PESAN URGENT: Jika ada koin yang sesuai kriteria
         fields = []
         for coin in matches:
             fields.append({
                 "name": f"🪙 {coin['symbol']}",
-                "value": f"**Funding:** `{coin['funding_rate_pct']}`",
+                "value": f"**Funding:** `{coin['funding_rate_pct']}`\n**Market:** [Buka Chart]({coin['url']})\n**Jaringan:** Binance Futures",
                 "inline": True
             })
 
         payload = {
             "username": "Binance Live Monitor",
             "embeds": [{
-                "title": "🚨 ALERT: KONDISI EKSTRIM DITEMUKAN!",
-                "description": f"Terdeteksi pada pukul `{now}`",
-                "color": 15158332, # Merah
-                "fields": fields,
-                "footer": {"text": "Bot akan langsung mengirim jika kriteria terpenuhi"}
+                "title": "🚨 ALERT: FUNDING FEE TERDETEKSI!",
+                "description": f"Terdeteksi pada pukul `{now}`\nKriteria: `>= 0.5%` atau `<= -0.5%` (Tanpa Batas Atas)",
+                "color": 15158332, # Warna Merah
+                "fields": fields[:25], # Limit Discord 25 field
+                "footer": {"text": "Monitoring Real-time Binance"}
             }]
         }
     else:
-        # PESAN RUTIN: Laporan setiap 10 menit (Nihil)
+        # Laporan rutin jika tidak ada koin yang memenuhi kriteria
         payload = {
             "username": "Binance Live Monitor",
             "embeds": [{
-                "description": f"✅ **Laporan Rutin {now}:** Tidak ada koin yang ekstrim dalam 10 menit terakhir.",
-                "color": 3066993, # Hijau
+                "description": f"✅ **Laporan Rutin {now}:** Tidak ada koin dengan funding >= 0.5%.",
+                "color": 3066993, # Warna Hijau
             }]
         }
 
     try:
-        requests.post(DISCORD_WEBHOOK_URL, json=payload)
-        print(f"[{now}] Pesan terkirim ke Discord (Urgent: {is_urgent})")
+        response = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
+        response.raise_for_status()
+        print(f"[{now}] Berhasil mengirim update ke Discord.")
     except Exception as e:
-        print(f"Error Discord: {e}")
+        print(f"[{now}] Error Discord: {e}")
 
 def check_funding():
     try:
-        response = requests.get(BINANCE_URL)
+        response = requests.get(BINANCE_URL, timeout=15)
+        response.raise_for_status()
         data = response.json()
+        
         matches = []
         for item in data:
             if 'lastFundingRate' not in item: continue
-            funding_pct = float(item['lastFundingRate']) * 100
             
-            # Filter: 1% s/d 2% atau -1% s/d -2%
-            if (1.0 <= funding_pct <= 2.0) or (-2.0 <= funding_pct <= -1.0):
+            # Konversi rate ke persentase (Contoh: 0.005 jadi 0.5%)
+            funding_pct = float(item['lastFundingRate']) * 100
+            symbol = item['symbol']
+            
+            # LOGIKA: Minimal 0.5% atau Minimal -0.5% (Tak Terbatas)
+            # abs() mengubah angka negatif menjadi positif untuk pengecekan jarak dari nol
+            if abs(funding_pct) >= 0.5:
                 matches.append({
-                    "symbol": item['symbol'], 
-                    "funding_rate_pct": f"{funding_pct:.4f}%"
+                    "symbol": symbol, 
+                    "funding_rate_pct": f"{funding_pct:.4f}%",
+                    "url": f"https://www.binance.com/id/futures/{symbol}"
                 })
         return matches
     except Exception as e:
-        print(f"Error Binance: {e}")
-        return []
+        print(f"Error mengambil data Binance: {e}")
+        return None
 
 if __name__ == "__main__":
-    print("=== BOT MONITORING MULTI-INTERVAL AKTIF ===")
-    print("Logika: Cek tiap 2 menit, Laporan rutin tiap 10 menit.")
+    print("=== BOT MONITORING AKTIF (AMBANG BATAS 0.5%) ===")
+    print("Script ini akan memantau koin dengan funding fee tinggi secara terus-menerus.")
     
     counter = 0
     while True:
         hasil_scan = check_funding()
         counter += 1
         
-        # JIKA ADA KOIN (URGENT): Langsung kirim saat itu juga
         if hasil_scan:
+            # Kirim alert jika ada koin yang sesuai kriteria
             send_to_discord(hasil_scan, is_urgent=True)
-            # Opsional: Jika sudah kirim urgent, kita reset counter rutinnya
-            counter = 0 
-        
-        # JIKA TIDAK ADA KOIN (RUTIN): Tunggu sampai 5 kali cek (10 menit)
-        elif counter >= 5:
+            counter = 0 # Reset counter laporan rutin
+        elif counter >= 5: 
+            # Kirim laporan rutin setiap 10 menit (5 * 2 menit) jika hasil nihil
             send_to_discord([], is_urgent=False)
             counter = 0
-        
         else:
-            now_log = datetime.now().strftime("%H:%M:%S")
-            print(f"[{now_log}] Cek ke-{counter}: Nihil. Menunggu 2 menit...")
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Cek #{counter}: Kondisi pasar normal.")
 
-        # Jeda antar pengecekan (2 menit)
+        # Jeda waktu antar pengecekan
         time.sleep(INTERVAL_CEK)
