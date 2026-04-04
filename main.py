@@ -3,28 +3,32 @@ import time
 
 # --- KONFIGURASI ---
 WEBHOOK_URL = "https://discord.com/api/webhooks/1489799903361372313/vhtfgVrueL8j0ziJB7gwSkTw97gjP4pz5qiajrOsQ_1b7omwWLCraXsFo4l1rlCwsTkX"
-MIN_PROFIT_THRESHOLD = 0.03  # Notif jika profit > 3%
-JEDA_PER_MARKET = 60         # Jeda 60 detik (1 menit) antar setiap sport
+TARGET_PRICE = 0.70          # Target harga 70%
+TOLERANCE = 0.05             # Rentang (0.65 - 0.75)
+DURASI_RESET = 60            # Reset/Jeda setiap 1 menit (60 detik)
 
-class PolySportsBot:
+class PolyBotReset:
     def __init__(self):
         self.gamma_url = "https://gamma-api.polymarket.com/markets"
         self.clob_url = "https://clob.polymarket.com/book"
 
-    def get_active_sports_markets(self):
+    def get_market_list(self):
+        """Mengambil daftar market olahraga terbaru"""
         params = {
             "active": "true",
             "closed": "false",
             "tag_id": "100381", # Kategori Sports
-            "limit": 50
+            "limit": 20
         }
         try:
             res = requests.get(self.gamma_url, params=params)
             return res.json()
-        except:
+        except Exception as e:
+            print(f"Gagal ambil data market: {e}")
             return []
 
-    def get_market_price(self, token_id):
+    def get_price(self, token_id):
+        """Mengambil harga bid terbaru dari CLOB"""
         try:
             res = requests.get(self.clob_url, params={"token_id": token_id})
             data = res.json()
@@ -34,53 +38,65 @@ class PolySportsBot:
         except:
             return None
 
-    def send_alert(self, question, p_yes, p_no, total):
-        profit = round((1 - total) * 100, 2)
-        # Menambahkan baris kosong (\n\n) agar pesan di Discord memiliki jarak
-        pesan = (
-            f"━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🚨 **SPORT ARBITRAGE DETECTED** 🚨\n\n"
-            f"🏀 **Event:**\n`{question}`\n\n"
-            f"✅ **YES:** `{p_yes}`\n"
-            f"❌ **NO:** `{p_no}`\n\n"
-            f"📊 **Total Prob:** `{round(total, 3)}`\n"
-            f"💰 **Est. Profit:** `{profit}%`\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━"
+    def send_discord(self, question, p_yes, p_no):
+        """Mengirim notifikasi dengan format spasi lebar"""
+        header = "✨ **NEW SPORT SIGNAL DETECTED** ✨"
+        divider = "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"
+        
+        # Format pesan dengan banyak spasi (Line Breaks)
+        content = (
+            f"{divider}\n\n"
+            f"{header}\n\n\n"
+            f"🏀 **EVENT OLAHRAGA:**\n"
+            f"`{question}`\n\n\n"
+            f"✅ **HARGA YES (PROB):**\n"
+            f"> `{p_yes} (Target 70% Zone)`\n\n"
+            f"❌ **HARGA NO:**\n"
+            f"> `{p_no if p_no else 'N/A'}`\n\n\n"
+            f"⏰ **WAKTU SCAN:**\n"
+            f"{time.strftime('%d/%m/%Y | %H:%M:%S')}\n\n\n"
+            f"{divider}"
         )
-        payload = {"content": pesan}
-        requests.post(WEBHOOK_URL, json=payload)
-        print(f"[{time.strftime('%H:%M:%S')}] Notifikasi dikirim untuk: {question[:30]}...")
+        
+        try:
+            requests.post(WEBHOOK_URL, json={"content": content})
+        except Exception as e:
+            print(f"Gagal kirim ke Discord: {e}")
 
-    def monitor(self):
-        print("Bot mulai berjalan. Mencari peluang...")
+    def start_bot(self):
+        print(f"Bot Aktif. Sistem akan reset/scan setiap {DURASI_RESET} detik.")
+        
         while True:
-            markets = self.get_active_sports_markets()
-            
+            print(f"\n[{time.strftime('%H:%M:%S')}] Memulai pemindaian market...")
+            markets = self.get_market_list()
+            found_count = 0
+
             for m in markets:
                 outcomes = m.get('clobTokenIds')
                 if not outcomes: continue
                 
+                # Konversi string ke list jika perlu
                 token_ids = eval(outcomes) if isinstance(outcomes, str) else outcomes
-                if len(token_ids) < 2: continue
+                if len(token_ids) < 1: continue
 
-                price_yes = self.get_market_price(token_ids[0])
-                price_no = self.get_market_price(token_ids[1])
-
-                if price_yes and price_no:
-                    # Filter agar tidak ambil harga sampah 0.001
-                    if price_yes > 0.01 and price_no > 0.01:
-                        total_prob = price_yes + price_no
-                        
-                        if total_prob < (1.0 - MIN_PROFIT_THRESHOLD):
-                            self.send_alert(m['question'], price_yes, price_no, total_prob)
-                            
-                            # JEDA 1 MENIT SETIAP KALI MENEMUKAN PELUANG
-                            print(f"Menunggu {JEDA_PER_MARKET} detik sebelum cek sport berikutnya...")
-                            time.sleep(JEDA_PER_MARKET)
+                # Cek harga YES (Indeks 0)
+                price_yes = self.get_price(token_ids[0])
                 
-            print("Scan list selesai, mengulang dari awal...")
-            time.sleep(10)
+                if price_yes:
+                    # Filter Harga 70% (0.65 - 0.75)
+                    if (TARGET_PRICE - TOLERANCE) <= price_yes <= (TARGET_PRICE + TOLERANCE):
+                        price_no = self.get_price(token_ids[1]) if len(token_ids) > 1 else None
+                        self.send_discord(m['question'], price_yes, price_no)
+                        found_count += 1
+                        # Jeda singkat antar pesan agar tidak diblokir Discord
+                        time.sleep(1)
+
+            print(f"Scan selesai. Menemukan {found_count} match.")
+            print(f"Bot akan istirahat (Reset) selama {DURASI_RESET} detik...")
+            
+            # --- LOGIKA RESET 1 MENIT ---
+            time.sleep(DURASI_RESET)
 
 if __name__ == "__main__":
-    bot = PolySportsBot()
-    bot.monitor()
+    bot = PolyBotReset()
+    bot.start_bot()
