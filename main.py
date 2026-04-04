@@ -70,7 +70,7 @@ def send_to_discord(item):
     }
     
     try:
-        requests.post(https://discord.com/api/webhooks/1489799903361372313/vhtfgVrueL8j0ziJB7gwSkTw97gjP4pz5qiajrOsQ_1b7omwWLCraXsFo4l1rlCwsTkX, json=payload)
+        requests.post(, json=payload)
     except Exception as e:
         print(f"Error sending to Discord: {e}")
 
