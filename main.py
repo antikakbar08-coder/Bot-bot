@@ -8,43 +8,42 @@ DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1489799903361372313/vhtf
 BINANCE_URL = "https://fapi.binance.com/fapi/v1/premiumIndex"
 
 def send_to_discord(matches):
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now().strftime("%H:%M:%S")
+    date_now = datetime.now().strftime("%d-%m-%Y")
     
     if matches:
-        # Jika ada koin yang ditemukan
+        # Jika ditemukan koin yang masuk kriteria
         fields = []
         for coin in matches:
             fields.append({
                 "name": f"🪙 {coin['symbol']}",
-                "value": f"**Funding Rate:** `{coin['funding_rate_pct']}`",
+                "value": f"**Funding:** `{coin['funding_rate_pct']}`",
                 "inline": True
             })
 
         payload = {
-            "username": "Binance Funding Bot",
+            "username": "Binance Funding Monitor",
             "embeds": [{
-                "title": "🚨 High Funding Rate Terdeteksi!",
-                "description": f"Waktu Pengecekan: `{now}`\nRentang Filter: 1% s/d 2% (Positif/Negatif)",
+                "title": "🚨 HIGH FUNDING ALERT!",
+                "description": f"Ditemukan koin dengan rate ekstrim pada pukul `{now}`",
                 "color": 15158332, # Merah
                 "fields": fields,
-                "footer": {"text": "Status: Ada Koin Aktif"}
+                "footer": {"text": f"Tanggal: {date_now} | Filter: 1% s/d 2%"}
             }]
         }
     else:
-        # Jika tidak ada koin yang ditemukan (Status Tetap Lapor)
+        # Jika hasil kosong (Laporan rutin setiap 10 menit)
         payload = {
-            "username": "Binance Funding Bot",
+            "username": "Binance Funding Monitor",
             "embeds": [{
-                "title": "🔍 Status: Monitoring Rutin",
-                "description": f"Waktu Pengecekan: `{now}`",
-                "color": 3447003, # Biru
-                "footer": {"text": "Hasil: Tidak ada koin yang memenuhi kriteria (-1% s/d -2% atau +1% s/d +2%)"}
+                "description": f"✅ **Check berkala {now}:** Tidak ada koin di rentang 1% - 2%.",
+                "color": 3066993, # Hijau
             }]
         }
 
     try:
         requests.post(DISCORD_WEBHOOK_URL, json=payload)
-        print(f"[{now}] Laporan terkirim ke Discord.")
+        print(f"[{now}] Laporan 10 menit terkirim.")
     except Exception as e:
         print(f"Gagal kirim ke Discord: {e}")
 
@@ -55,28 +54,28 @@ def check_funding():
         
         matches = []
         for item in data:
-            if 'lastFundingRate' not in item:
-                continue
+            if 'lastFundingRate' not in item: continue
                 
-            funding_rate = float(item['lastFundingRate'])
-            funding_pct = funding_rate * 100
+            funding_pct = float(item['lastFundingRate']) * 100
             
-            # Filter 1% - 2% atau -1% - -2%
+            # Filter sesuai permintaan: 1% s/d 2% atau -1% s/d -2%
             if (1.0 <= funding_pct <= 2.0) or (-2.0 <= funding_pct <= -1.0):
                 matches.append({
                     "symbol": item['symbol'],
                     "funding_rate_pct": f"{funding_pct:.4f}%"
                 })
         
-        # Kirim hasil ke Discord (baik ada koin maupun tidak)
         send_to_discord(matches)
 
     except Exception as e:
-        print(f"Terjadi kesalahan saat fetch data: {e}")
+        print(f"Terjadi kesalahan data: {e}")
 
 if __name__ == "__main__":
-    print("Bot dimulai. Melakukan pengecekan setiap 50 detik...")
+    print("=== BOT FUNDING MONITOR AKTIF ===")
+    print("Interval: Setiap 10 Menit")
+    
     while True:
         check_funding()
-        # Reset interval 50 detik
-        time.sleep(50)
+        
+        # Delay 10 menit (10 * 60 detik)
+        time.sleep(600)
