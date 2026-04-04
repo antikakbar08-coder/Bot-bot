@@ -1,104 +1,117 @@
 import time
-import os
+import requests
 from discord_webhook import DiscordWebhook, DiscordEmbed
-from polymarket_py import ClobClient
 
 # --- KONFIGURASI ---
+# Ganti dengan URL Webhook Anda jika berbeda
 WEBHOOK_URL = "https://discord.com/api/webhooks/1489799903361372313/vhtfgVrueL8j0ziJB7gwSkTw97gjP4pz5qiajrOsQ_1b7omwWLCraXsFo4l1rlCwsTkX"
 
-# Inisialisasi Client (Tanpa API Key jika hanya membaca harga publik)
-client = ClobClient(host="https://clob.polymarket.com")
+# Target Profit (%)
+MIN_PROFIT = 30
+MAX_PROFIT = 100
 
-def send_alert(category, title, price, fair_price, profit, slug):
-    """Mengirim notifikasi ke Discord dengan format rapi"""
-    webhook = DiscordWebhook(url=WEBHOOK_URL)
-    
-    # Pengaturan Visual berdasarkan Kategori
-    if category.lower() == "sports":
-        color = "ff9900"  # Oranye
-        logo = "🏆 SPORTS"
-    elif category.lower() == "politics":
-        color = "03b2f8"  # Biru
-        logo = "🏛️ POLITICS"
-    else:
-        color = "9b59b6"  # Ungu (Lainnya)
-        logo = f"🔔 {category.upper()}"
-
-    market_url = f"https://polymarket.com/event/{slug}"
-    separator = "------------------------------------------"
-    
-    # Isi Pesan
-    description = (
-        f"{separator}\n"
-        f"**Market:** {title}\n\n"
-        f"**Price:** ${price:.2f}\n"
-        f"**Fair Price:** ${fair_price:.2f}\n"
-        f"**Est. Profit:** {profit:.2f}%\n"
-        f"{separator}\n"
-        f"🔗 [Lihat Market]({market_url})"
-    )
-
-    embed = DiscordEmbed(
-        title=f"🚨 {logo} OPPORTUNITY FOUND!",
-        description=description,
-        color=color
-    )
-    embed.set_timestamp()
-    webhook.add_embed(embed)
-    
-    response = webhook.execute()
-    if response.status_code == 200 or response.status_code == 204:
-        print(f"[✓] Alert Terkirim: {title[:30]}...")
-    else:
-        print(f"[!] Gagal kirim Webhook: {response.status_code}")
-
-def scan_polymarket():
-    print(f"[*] Memulai scanning pada {time.strftime('%H:%M:%S')}...")
-    
+def send_discord_alert(category, title, price, fair_price, profit, slug):
+    """Mengirim notifikasi ke Discord dengan pemisah dan logo"""
     try:
-        # Mengambil daftar market aktif
-        markets = client.get_markets()
+        webhook = DiscordWebhook(url=WEBHOOK_URL)
+        
+        # Penentuan Warna dan Logo berdasarkan Kategori
+        if "sport" in category.lower():
+            color = "ff9900" # Oranye untuk Sports
+            logo = "🏆 SPORTS"
+        else:
+            color = "03b2f8" # Biru untuk Politics
+            logo = "🏛️ POLITICS"
+
+        market_url = f"https://polymarket.com/event/{slug}"
+        separator = "------------------------------------------"
+        
+        # Body Pesan dengan persentase profit yang jelas
+        content = (
+            f"{separator}\n"
+            f"**Market:** {title}\n\n"
+            f"**Harga Saat Ini:** ${price:.2f}\n"
+            f"**Harga Wajar:** ${fair_price:.2f}\n"
+            f"**Potensi Profit:** 🔥 `{profit:.2f}%`\n"
+            f"{separator}\n"
+            f"🔗 [Lihat Market]({market_url})"
+        )
+
+        embed = DiscordEmbed(
+            title=f"🚨 {logo} OPPORTUNITY FOUND!",
+            description=content,
+            color=color
+        )
+        embed.set_timestamp()
+        webhook.add_embed(embed)
+        webhook.execute()
+        print(f"[✓] Alert Terkirim: {title[:40]}... ({profit:.2f}%)")
+
+    except Exception as e:
+        print(f"[!] Gagal mengirim ke Discord: {e}")
+
+def scan_markets():
+    print(f"[*] Scanning Markets... ({time.strftime('%H:%M:%S')})")
+    try:
+        # Mengambil data market aktif (Limit 100 untuk stabilitas)
+        url = "https://gamma-api.polymarket.com/markets?active=true&limit=100"
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code != 200:
+            print(f"[!] API Error: {response.status_code}")
+            return
+
+        markets = response.json()
         
         for m in markets:
-            # Filter Kategori
-            category = m.get('category', 'Unknown')
-            if category not in ["Politics", "Sports"]:
+            # 1. FILTER KATEGORI (Hanya Politik & Sports)
+            cat_name = m.get('groupItemTitle', 'Unknown')
+            if not any(x in cat_name.lower() for x in ["politics", "election", "sports", "nba", "soccer", "football"]):
                 continue
 
-            # Logika Perhitungan Mispricing
-            # Catatan: 'fair_price' biasanya didapat dari provider data luar atau rata-rata orderbook
-            # Di sini kita simulasikan pengecekan harga terhadap target profit Anda
-            current_price = float(m.get('last_trade_price', 0))
+            # Ambil harga (Outcome 0 biasanya 'Yes' atau opsi utama)
+            prices = m.get('outcomePrices')
+            if not prices: continue
             
-            # Simulasi Fair Price (Ganti dengan logika prediksi/fair value Anda)
-            # Contoh: jika harga 0.40 tapi data statistik bilang harusnya 0.60
-            fair_price = m.get('fair_price', current_price * 1.4) 
-
-            if current_price > 0:
+            current_price = float(prices[0])
+            
+            # 2. LOGIKA PERHITUNGAN PROFIT
+            # Di sini kita asumsikan 'Fair Price' adalah harga target (misal 0.85)
+            # Anda bisa mengganti angka 0.85 dengan logika prediksi Anda sendiri
+            fair_price = 0.85 
+            
+            if 0.05 < current_price < 0.80:
+                # Rumus Profit: ((Target - Harga) / Harga) * 100
                 profit_pct = ((fair_price - current_price) / current_price) * 100
                 
-                # Filter Profit 30% hingga 100%
-                if 30 <= profit_pct <= 100:
-                    send_alert(
-                        category=category,
+                # 3. FILTER PRESENTASE (30% - 100%)
+                if MIN_PROFIT <= profit_pct <= MAX_PROFIT:
+                    send_discord_alert(
+                        category=cat_name,
                         title=m.get('question', 'No Title'),
                         price=current_price,
                         fair_price=fair_price,
                         profit=profit_pct,
-                        slug=m.get('market_slug', '')
+                        slug=m.get('slug', '')
                     )
-
+                    
     except Exception as e:
-        print(f"[!] Error saat scanning: {e}")
+        print(f"[!] Error saat scan: {e}")
 
-# --- LOOP UTAMA (Reset 1 Menit) ---
+# --- LOOP UTAMA (Reset 30 Detik) ---
 if __name__ == "__main__":
-    print("=== BOT POLYMARKET MISPRICING STARTED ===")
-    print(f"Target: Politics & Sports | Profit: 30% - 100%")
+    print("=== BOT POLYMARKET POLITIC & SPORT STARTED ===")
+    print(f"Filter Profit: {MIN_PROFIT}% - {MAX_PROFIT}% | Reset: 30s")
     
     while True:
-        scan_polymarket()
-        
-        print(f"[*] Scan Selesai. Reset dalam 60 detik...")
-        print("="*50) 
-        time.sleep(60) # Jeda 1 menit sebelum scan ulang
+        try:
+            scan_markets()
+            print(f"[*] Scan selesai. Reset dalam 30 detik...")
+            print("="*50)
+            time.sleep(30) # DELAY 30 DETIK PER RESET
+        except KeyboardInterrupt:
+            print("\n[!] Bot dimatikan.")
+            break
+        except Exception as e:
+            print(f"[!!] Terjadi kesalahan kritis: {e}")
+            time.sleep(10)
