@@ -1,100 +1,91 @@
-import requests
-import json
+import os
 import time
+import requests
 from datetime import datetime
 
-# ================= CONFIGURATION =================
-# GANTI DENGAN WEBHOOK URL ANDA
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/..." 
-BINANCE_URL = "https://fapi.binance.com/fapi/v1/premiumIndex"
-INTERVAL_CEK = 120  # Cek setiap 120 detik (2 menit)
-# =================================================
+# --- CONFIGURATION ---
+# Pastikan URL ini dimasukkan ke Environment Variable di Railway dengan nama DISCORD_WEBHOOK_URL
+# Jika ingin hardcode (tidak disarankan), pastikan diapit tanda kutip ""
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1489799903361372313/vhtfgVrueL8j0ziJB7gwSkTw97gjP4pz5qiajrOsQ_1b7omwWLCraXsFo4l1rlCwsTkX")
 
-def send_to_discord(matches, is_urgent=False):
-    now = datetime.now().strftime("%H:%M:%S")
+def get_arbitrage_data():
+    # Simulasi data (Ganti dengan logika API Polymarket/CCXT aslimu)
+    return [
+        {
+            "sport": "baseball",
+            "event": "Cleveland Guardians vs Detroit Tigers",
+            "market": "Win 2026 World Series",
+            "yes_odds": 0.001,
+            "no_odds": 0.001,
+            "total_prob": 0.002,
+            "profit": 99.8
+        },
+        {
+            "sport": "soccer",
+            "event": "World Cup 2026 - Winner",
+            "market": "Indonesia win World Cup",
+            "yes_odds": 0.05,
+            "no_odds": 0.85,
+            "total_prob": 0.90,
+            "profit": 10.0
+        }
+    ]
+
+def send_to_discord(item):
+    emoji = "⚾" if item['sport'] == "baseball" else "⚽"
     
-    if matches:
-        fields = []
-        for coin in matches:
-            fields.append({
-                "name": f"🪙 {coin['symbol']}",
-                "value": f"**Funding:** `{coin['funding_rate_pct']}`\n**Market:** [Buka Chart]({coin['url']})\n**Jaringan:** Binance Futures",
-                "inline": True
-            })
-
-        payload = {
-            "username": "Binance Live Monitor",
-            "embeds": [{
-                "title": "🚨 ALERT: FUNDING FEE TERDETEKSI!",
-                "description": f"Terdeteksi pada pukul `{now}`\nKriteria: `>= 0.5%` atau `<= -0.5%` (Tanpa Batas Atas)",
-                "color": 15158332, # Warna Merah
-                "fields": fields[:25], # Limit Discord 25 field
-                "footer": {"text": "Monitoring Real-time Binance"}
-            }]
-        }
-    else:
-        # Laporan rutin jika tidak ada koin yang memenuhi kriteria
-        payload = {
-            "username": "Binance Live Monitor",
-            "embeds": [{
-                "description": f"✅ **Laporan Rutin {now}:** Tidak ada koin dengan funding >= 0.5%.",
-                "color": 3066993, # Warna Hijau
-            }]
-        }
-
+    payload = {
+        "embeds": [{
+            "title": "🚨 SPORT ARBITRAGE DETECTED 🚨",
+            "color": 15158332,
+            "fields": [
+                {
+                    "name": f"{emoji} Event",
+                    "value": f"**{item['event']}**\n*{item['market']}*",
+                    "inline": False
+                },
+                {
+                    "name": "📊 Market Odds",
+                    "value": f"✅ **YES:** `{item['yes_odds']}`  |  ❌ **NO:** `{item['no_odds']}`",
+                    "inline": False
+                },
+                {
+                    "name": "📈 Total Prob",
+                    "value": f"`{item['total_prob']}`",
+                    "inline": True
+                },
+                {
+                    "name": "💰 Est. Profit",
+                    "value": f"**{item['profit']}%**",
+                    "inline": True
+                }
+            ],
+            "footer": {
+                "text": f"Polymarket Monitoring • {datetime.now().strftime('%H:%M:%S')}"
+            }
+        }]
+    }
+    
     try:
-        response = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
-        response.raise_for_status()
-        print(f"[{now}] Berhasil mengirim update ke Discord.")
+        # Perbaikan: Menambahkan variabel URL dan menangani respon
+        requests.post(DISCORD_WEBHOOK_URL, json=payload)
     except Exception as e:
-        print(f"[{now}] Error Discord: {e}")
+        print(f"Error sending to Discord: {e}")
 
-def check_funding():
-    try:
-        response = requests.get(BINANCE_URL, timeout=15)
-        response.raise_for_status()
-        data = response.json()
+def main():
+    print("🚀 Monitoring Sport Arbitrage started...")
+    while True:
+        data = get_arbitrage_data()
         
-        matches = []
         for item in data:
-            if 'lastFundingRate' not in item: continue
-            
-            # Konversi rate ke persentase (Contoh: 0.005 jadi 0.5%)
-            funding_pct = float(item['lastFundingRate']) * 100
-            symbol = item['symbol']
-            
-            # LOGIKA: Minimal 0.5% atau Minimal -0.5% (Tak Terbatas)
-            # abs() mengubah angka negatif menjadi positif untuk pengecekan jarak dari nol
-            if abs(funding_pct) >= 0.5:
-                matches.append({
-                    "symbol": symbol, 
-                    "funding_rate_pct": f"{funding_pct:.4f}%",
-                    "url": f"https://www.binance.com/id/futures/{symbol}"
-                })
-        return matches
-    except Exception as e:
-        print(f"Error mengambil data Binance: {e}")
-        return None
+            send_to_discord(item)
+            # Jeda 2 detik antar pesan agar tidak kena spam filter Discord
+            time.sleep(2)
+        
+        # --- PERUBAHAN DISINI ---
+        # 300 detik = 5 menit
+        print(f"✅ Data sent. Waiting 5 minutes for next check...")
+        time.sleep(300) 
 
 if __name__ == "__main__":
-    print("=== BOT MONITORING AKTIF (AMBANG BATAS 0.5%) ===")
-    print("Script ini akan memantau koin dengan funding fee tinggi secara terus-menerus.")
-    
-    counter = 0
-    while True:
-        hasil_scan = check_funding()
-        counter += 1
-        
-        if hasil_scan:
-            # Kirim alert jika ada koin yang sesuai kriteria
-            send_to_discord(hasil_scan, is_urgent=True)
-            counter = 0 # Reset counter laporan rutin
-        elif counter >= 5: 
-            # Kirim laporan rutin setiap 10 menit (5 * 2 menit) jika hasil nihil
-            send_to_discord([], is_urgent=False)
-            counter = 0
-        else:
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] Cek #{counter}: Kondisi pasar normal.")
-
-        # Jeda waktu antar pengecekan
-        time.sleep(INTERVAL_CEK)
+    main()
