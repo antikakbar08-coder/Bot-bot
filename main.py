@@ -1,109 +1,128 @@
-import requests
+import os
 import time
+import requests
 from datetime import datetime
 
-# ================= CONFIGURATION =================
-# URL API Binance Futures
-BINANCE_URL = "https://fapi.binance.com/fapi/v1/premiumIndex"
-
-# URL Webhook Discord Anda (Sudah diupdate)
+# --- CONFIGURATION ---
+# Webhook URL Discord Anda
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1489799903361372313/vhtfgVrueL8j0ziJB7gwSkTw97gjP4pz5qiajrOsQ_1b7omwWLCraXsFo4l1rlCwsTkX"
 
-INTERVAL_CEK = 120      # Cek market setiap 2 menit (120 detik)
-INTERVAL_RUTIN = 420    # Kirim laporan rutin setiap 7 menit (420 detik)
-THRESHOLD = 1.5         # Ambang batas funding rate (1.5% atau -1.5%)
-# =================================================
+# Tracker untuk membatasi maksimal 3 notifikasi per event/koin yang sama
+# Disimpan di luar loop agar data tidak hilang setiap pengecekan
+notification_tracker = {}
 
-session = requests.Session()
+# Simulasi data dari Polymarket & CCXT
+def get_arbitrage_data():
+    # Contoh data sesuai format yang Anda kirim tadi
+    return [
+        {
+            "sport": "baseball",
+            "event": "Cleveland Guardians vs Detroit Tigers",
+            "market": "Win 2026 World Series",
+            "yes_odds": 0.001,
+            "no_odds": 0.001,
+            "total_prob": 0.002,
+            "profit": 99.8
+        },
+        {
+            "sport": "soccer",
+            "event": "World Cup 2026 - Winner",
+            "market": "Indonesia win World Cup",
+            "yes_odds": 0.05,
+            "no_odds": 0.85,
+            "total_prob": 0.90,
+            "profit": 10.0
+        }
+    ]
 
-def send_to_discord(matches, is_urgent=False):
-    now = datetime.now().strftime("%H:%M:%S")
+def send_to_discord(item):
+    # Identitas unik koin/event
+    event_id = item['event']
     
-    if is_urgent:
-        # Format pesan jika ditemukan kondisi ekstrim
-        payload = {
-            "username": "Binance Extreme Alert",
-            "embeds": [{
-                "title": "🚨 ALERT: FUNDING EKSTRIM TERDETEKSI",
-                "description": f"Terdeteksi pada pukul `{now}` dengan threshold >{THRESHOLD}% atau <-{THRESHOLD}%",
-                "color": 15158332, # Warna Merah
-                "fields": matches,
-                "footer": {"text": "Monitoring 24/7 Binance Futures | Urgent Mode"}
-            }]
-        }
-    else:
-        # Format laporan rutin jika kondisi aman
-        payload = {
-            "username": "Binance Routine Monitor",
-            "embeds": [{
-                "description": f"✅ **Laporan Rutin {now}:** Kondisi market stabil. Tidak ada koin di atas ambang batas {THRESHOLD}%.",
-                "color": 3066993, # Warna Hijau
-            }]
-        }
+    # Ambil jumlah pengiriman sebelumnya (default 0)
+    already_sent = notification_tracker.get(event_id, 0)
+    
+    # --- LOGIKA PEMBATASAN MAKSIMAL 3 NOTIFIKASI ---
+    if already_sent >= 3:
+        print(f"   [SKIP] {event_id} sudah dikirim {already_sent} kali. Melewati pengiriman.")
+        return
 
-    try:
-        response = session.post(DISCORD_WEBHOOK_URL, json=payload)
-        response.raise_for_status()
-        print(f"[{now}] Pesan terkirim ke Discord (Urgent: {is_urgent})")
-    except Exception as e:
-        print(f"[{now}] Error mengirim ke Discord: {e}")
-
-def check_market():
-    try:
-        response = session.get(BINANCE_URL, timeout=15)
-        response.raise_for_status()
-        data = response.json()
-        extreme_coins = []
-        
-        for item in data:
-            if 'lastFundingRate' not in item: 
-                continue
-                
-            # Konversi rate decimal ke persen
-            funding_pct = float(item['lastFundingRate']) * 100
-            mark_price = float(item.get('markPrice', 0))
-            
-            # Cek jika melewati ambang batas positif atau negatif
-            if abs(funding_pct) >= THRESHOLD:
-                extreme_coins.append({
-                    "name": f"🪙 {item['symbol']}",
-                    "value": f"**Funding:** `{funding_pct:.4f}%` \n**Price:** `${mark_price:,.4f}`",
+    # Pilih emoji berdasarkan jenis olahraga
+    emoji = "⚾" if item['sport'] == "baseball" else "⚽"
+    
+    # Format pesan Embed sesuai codingan awal Anda
+    payload = {
+        "embeds": [{
+            "title": "🚨 SPORT ARBITRAGE DETECTED 🚨",
+            "description": f"Notifikasi ke-{already_sent + 1} dari batas 3x.",
+            "color": 15158332, # Warna Merah
+            "fields": [
+                {
+                    "name": f"{emoji} Event",
+                    "value": f"**{item['event']}**\n*{item['market']}*",
+                    "inline": False
+                },
+                {
+                    "name": "📊 Market Odds",
+                    "value": f"✅ **YES:** `{item['yes_odds']}`  |  ❌ **NO:** `{item['no_odds']}`",
+                    "inline": False
+                },
+                {
+                    "name": "📈 Total Prob",
+                    "value": f"`{item['total_prob']}`",
                     "inline": True
-                })
-        return extreme_coins
+                },
+                {
+                    "name": "💰 Est. Profit",
+                    "value": f"**{item['profit']}%**",
+                    "inline": True
+                }
+            ],
+            "footer": {
+                "text": f"Polymarket Monitoring • {datetime.now().strftime('%H:%M:%S')}"
+            }
+        }]
+    }
+    
+    try:
+        # Mengirim ke Discord Webhook
+        response = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=15)
+        
+        # Jika berhasil (status 204), update tracker
+        if response.status_code == 204:
+            notification_tracker[event_id] = already_sent + 1
+            print(f"   [SENT] {event_id} berhasil dikirim ({notification_tracker[event_id]}/3)")
+        else:
+            print(f"   [ERROR] Discord API Error: {response.status_code}")
+            
     except Exception as e:
-        print(f"Error Binance API: {e}")
-        return None
+        print(f"   [CRITICAL] Gagal koneksi ke Discord: {e}")
+
+def main():
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 Monitoring 24 Jam Aktif...")
+    
+    while True:
+        try:
+            # Pengecekan data tetap berjalan normal setiap siklus
+            print(f"\n--- Memulai Pengecekan Rutin ({datetime.now().strftime('%H:%M:%S')}) ---")
+            data = get_arbitrage_data()
+            
+            for item in data:
+                send_to_discord(item)
+                # Jeda singkat antar pesan agar tidak terkena rate limit Discord
+                time.sleep(2)
+            
+            # Jeda antar pengecekan diubah menjadi 10 MENIT (600 detik)
+            print(f"Siklus selesai. Menunggu 10 menit untuk pengecekan berikutnya...")
+            time.sleep(600)
+            
+        except KeyboardInterrupt:
+            print("\nProgram dihentikan oleh user.")
+            break
+        except Exception as e:
+            # Jika ada error internet, bot tidak mati, tunggu 1 menit lalu coba lagi
+            print(f"⚠️ Terjadi error: {e}")
+            time.sleep(60)
 
 if __name__ == "__main__":
-    print(f"=== BOT AKTIF ===")
-    print(f"Interval Cek: {INTERVAL_CEK} detik")
-    print(f"Interval Rutin: {INTERVAL_RUTIN} detik")
-    print(f"Threshold: {THRESHOLD}%")
-    print("=================")
-
-    # Inisialisasi waktu terakhir laporan rutin dikirim
-    last_routine_time = time.time()
-
-    while True:
-        # 1. Ambil data dari Binance
-        results = check_market()
-        current_time = time.time()
-        
-        if results:
-            # 2. Jika ada koin ekstrim, LANGSUNG kirim ke Discord
-            send_to_discord(results, is_urgent=True)
-            # Reset timer rutin agar tidak double kirim setelah alert
-            last_routine_time = current_time 
-            
-        else:
-            # 3. Jika tidak ada yang ekstrim, cek apakah sudah masuk jadwal rutin 7 menit
-            if (current_time - last_routine_time) >= INTERVAL_RUTIN:
-                send_to_discord(None, is_urgent=False)
-                last_routine_time = current_time
-            else:
-                # Log di terminal saja agar Anda tahu bot masih hidup
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] Scan selesai: Market aman.")
-
-        # 4. Tunggu selama 2 menit sebelum scan ulang
-        time.sleep(INTERVAL_CEK)
+    main()
