@@ -2,7 +2,7 @@ import requests
 import time
 
 # --- KONFIGURASI ---
-WEBHOOK_URL = "URL_WEBHOOK_DISCORD_ANDA"
+WEBHOOK_URL = "https://discord.com/api/webhooks/1489799903361372313/vhtfgVrueL8j0ziJB7gwSkTw97gjP4pz5qiajrOsQ_1b7omwWLCraXsFo4l1rlCwsTkX"
 MIN_PROFIT_THRESHOLD = 0.02  # Notif jika harga total < 0.98 (Profit 2%)
 POLL_INTERVAL = 10           # Cek setiap 10 detik
 
