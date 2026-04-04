@@ -1,94 +1,91 @@
-import ccxt
-import requests
-import time
 import os
+import time
+import requests
+from datetime import datetime
 
-# ========================================================
-# 🟢 TEMPAT MENAMBAHKAN WEBHOOK BARU
-# Silakan masukkan link webhook Discord Anda di dalam tanda kurung [ ]
-# Contoh: "https://discord.com/api/webhooks/..."
-# ========================================================
-MY_WEBHOOKS = [ "https://discord.com/api/webhooks/1489799903361372313/vhtfgVrueL8j0ziJB7gwSkTw97gjP4pz5qiajrOsQ_1b7omwWLCraXsFo4l1rlCwsTkX
-    # Masukkan link webhook baru di sini
-"]
-# ========================================================
+# --- CONFIGURATION ---
+# Masukkan Webhook URL Discord kamu di environment variable Railway
+DISCORD_WEBHOOK_URL = os.getenv("https://discord.com/api/webhooks/1489799903361372313/vhtfgVrueL8j0ziJB7gwSkTw97gjP4pz5qiajrOsQ_1b7omwWLCraXsFo4l1rlCwsTkX")
 
-# --- DAFTAR KOIN MEME BYBIT ---
-MEME_COINS = [
-    'DOGE', 'SHIB', 'PEPE', 'WIF', 'BONK', 'FLOKI', 
-    'MEME', 'BOME', '1000PEPE', 'TURBO', 'BABYDOGE',
-    'MYRO', '1000LUNC', '1000RATS', '1000SATS'
-]
+# Simulasi data dari Polymarket & CCXT
+# Dalam aplikasi nyata, kamu akan memanggil API Polymarket atau CCXT di sini
+def get_arbitrage_data():
+    # Contoh data sport (Baseball & Soccer)
+    return [
+        {
+            "sport": "baseball",
+            "event": "Cleveland Guardians vs Detroit Tigers",
+            "market": "Win 2026 World Series",
+            "yes_odds": 0.001,
+            "no_odds": 0.001,
+            "total_prob": 0.002,
+            "profit": 99.8
+        },
+        {
+            "sport": "soccer",
+            "event": "World Cup 2026 - Winner",
+            "market": "Indonesia win World Cup",
+            "yes_odds": 0.05,
+            "no_odds": 0.85,
+            "total_prob": 0.90,
+            "profit": 10.0
+        }
+    ]
 
-# --- AMBANG BATAS NOTIFIKASI ---
-FUNDING_LOW = -2.0   # Notifikasi jika Funding Fee <= -2%
-FUNDING_HIGH = 20.0  # Notifikasi jika Funding Fee >= 20%
-
-# Inisialisasi Bursa Bybit
-exchange = ccxt.bybit({
-    'enableRateLimit': True,
-    'options': {'defaultType': 'linear'}
-})
-
-def broadcast_discord(embed):
-    """Mengirim pesan ke semua webhook yang terdaftar"""
-    if not MY_WEBHOOKS:
-        print("⚠️ Peringatan: Belum ada Webhook yang diisi di MY_WEBHOOKS!", flush=True)
-        return
-
+def send_to_discord(item):
+    # Pilih emoji berdasarkan jenis olahraga
+    emoji = "⚾" if item['sport'] == "baseball" else "⚽"
+    
+    # Membuat format pesan yang rapi dengan "Embed" style (via Webhook)
     payload = {
-        "username": "Bybit Meme Hunter",
-        "avatar_url": "https://i.imgur.com/8nLsn7V.png",
-        "embeds": [embed]
+        "embeds": [{
+            "title": "🚨 SPORT ARBITRAGE DETECTED 🚨",
+            "color": 15158332, # Warna Merah
+            "fields": [
+                {
+                    "name": f"{emoji} Event",
+                    "value": f"**{item['event']}**\n*{item['market']}*",
+                    "inline": False
+                },
+                {
+                    "name": "📊 Market Odds",
+                    "value": f"✅ **YES:** `{item['yes_odds']}`  |  ❌ **NO:** `{item['no_odds']}`",
+                    "inline": False
+                },
+                {
+                    "name": "📈 Total Prob",
+                    "value": f"`{item['total_prob']}`",
+                    "inline": True
+                },
+                {
+                    "name": "💰 Est. Profit",
+                    "value": f"**{item['profit']}%**",
+                    "inline": True
+                }
+            ],
+            "footer": {
+                "text": f"Polymarket Monitoring • {datetime.now().strftime('%H:%M:%S')}"
+            }
+        }]
     }
     
-    for url in MY_WEBHOOKS:
-        try:
-            if "discord.com" in url:
-                requests.post(url, json=payload, timeout=10)
-        except Exception as e:
-            print(f"❌ Gagal mengirim ke salah satu webhook: {e}")
+    try:
+        requests.post(https://discord.com/api/webhooks/1489799903361372313/vhtfgVrueL8j0ziJB7gwSkTw97gjP4pz5qiajrOsQ_1b7omwWLCraXsFo4l1rlCwsTkX, json=payload)
+    except Exception as e:
+        print(f"Error sending to Discord: {e}")
 
-def start_monitor():
-    print(f"🚀 Bot Railway Aktif. Memantau {len(MEME_COINS)} Koin Meme...", flush=True)
+def main():
+    print("🚀 Monitoring Sport Arbitrage started...")
     while True:
-        try:
-            # Mengambil data harga dan funding terbaru
-            tickers = exchange.fetch_tickers()
-            
-            for symbol, data in tickers.items():
-                # Filter: Hanya USDT Perpetual & Ada dalam daftar koin meme
-                if ':USDT' in symbol and any(m in symbol for m in MEME_COINS):
-                    
-                    info = data.get('info', {})
-                    funding = info.get('fundingRate')
-                    
-                    if funding:
-                        fr_pct = float(funding) * 100
-                        
-                        # Cek apakah melewati ambang batas -2% atau +20%
-                        if fr_pct <= FUNDING_LOW or fr_pct >= FUNDING_HIGH:
-                            warna = 0x00FFFF if fr_pct < 0 else 0xFF00FF
-                            
-                            embed = {
-                                "title": f"🔔 MEME FUNDING ALERT: {symbol}",
-                                "url": f"https://www.bybit.com/en/trade/futures/usdt/{symbol.replace(':USDT', '')}",
-                                "color": warna,
-                                "fields": [
-                                    {"name": "Funding Rate", "value": f"**{fr_pct:.4f}%**", "inline": True},
-                                    {"name": "Aksi", "value": "Short Diuntungkan" if fr_pct > 0 else "Long Diuntungkan", "inline": True},
-                                ],
-                                "footer": {"text": "Railway Engine • 24/7 Analysis"}
-                            }
-                            broadcast_discord(embed)
-                            print(f"✅ Alert terkirim: {symbol} ({fr_pct:.2f}%)", flush=True)
-
-            # Jeda 60 detik agar tidak terkena rate limit API
-            time.sleep(60)
-
-        except Exception as e:
-            print(f"❌ Error Sistem: {e}", flush=True)
-            time.sleep(30)
+        data = get_arbitrage_data()
+        
+        for item in data:
+            send_to_discord(item)
+            # Memberikan jeda singkat antar pesan agar tidak dianggap spam oleh Discord
+            time.sleep(2)
+        
+        # Jeda antar pengecekan (misal 5 menit)
+        time.sleep(300)
 
 if __name__ == "__main__":
-    start_monitor()
+    main()
