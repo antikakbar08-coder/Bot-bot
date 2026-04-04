@@ -1,6 +1,6 @@
 def send_discord_alert(title, description, color, category, market_slug):
     """Mengirim notifikasi ke Discord dengan logo kategori yang jelas"""
-    webhook = DiscordWebhook"https://discord.com/api/webhooks/1489799903361372313/vhtfgVrueL8j0ziJB7gwSkTw97gjP4pz5qiajrOsQ_1b7omwWLCraXsFo4l1rlCwsTkX"
+    webhook = DiscordWebhook (https://discord.com/api/webhooks/1489799903361372313/vhtfgVrueL8j0ziJB7gwSkTw97gjP4pz5qiajrOsQ_1b7omwWLCraXsFo4l1rlCwsTkX)
     
     # Menentukan logo berdasarkan kategori
     if category.upper() == "SPORTS":
