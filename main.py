@@ -1,117 +1,97 @@
+
 import requests
 import json
 import time
 from datetime import datetime
 
 # ================= CONFIGURATION =================
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1489799903361372313/vhtfgVrueL8j0ziJB7gwSkTw97gjP4pz5qiajrOsQ_1b7omwWLCraXsFo4l1rlCwsTkX"
 BINANCE_URL = "https://fapi.binance.com/fapi/v1/premiumIndex"
-DISCORD_WEBHOOK_URL = "ISI_URL_WEBHOOK_ANDA_DI_SINI"
-INTERVAL_CEK = 120  # Cek setiap 2 menit
-THRESHOLD = 1.0     # Ambang batas %
-
-# Variabel untuk menyimpan state koin yang sudah di-notif agar tidak spam
-already_notified = set() 
-
+INTERVAL_CEK = 120  # Cek setiap 2 menit (120 detik)
 # =================================================
 
 def send_to_discord(matches, is_urgent=False):
     now = datetime.now().strftime("%H:%M:%S")
     
     if matches:
+        # PESAN URGENT: Jika ada koin yang sesuai kriteria
         fields = []
         for coin in matches:
             fields.append({
                 "name": f"🪙 {coin['symbol']}",
-                "value": f"**Funding:** `{coin['funding_rate_pct']}`\n**Price:** `${coin['price']}`",
+                "value": f"**Funding:** `{coin['funding_rate_pct']}`",
                 "inline": True
             })
 
         payload = {
             "username": "Binance Live Monitor",
             "embeds": [{
-                "title": "🚨 ALERT: PERUBAHAN FUNDING BARU",
-                "description": f"Koin baru terdeteksi pada pukul `{now}`",
-                "color": 15158332, 
+                "title": "🚨 ALERT: KONDISI EKSTRIM DITEMUKAN!",
+                "description": f"Terdeteksi pada pukul `{now}`",
+                "color": 15158332, # Merah
                 "fields": fields,
-                "footer": {"text": "Monitoring 24/7 Binance Futures"}
+                "footer": {"text": "Bot akan langsung mengirim jika kriteria terpenuhi"}
             }]
         }
     else:
-        # Pesan rutin hanya jika tidak ada koin aktif sama sekali
+        # PESAN RUTIN: Laporan setiap 10 menit (Nihil)
         payload = {
             "username": "Binance Live Monitor",
             "embeds": [{
-                "description": f"✅ **Laporan Rutin {now}:** Market cenderung stabil.",
-                "color": 3066993,
+                "description": f"✅ **Laporan Rutin {now}:** Tidak ada koin yang ekstrim dalam 10 menit terakhir.",
+                "color": 3066993, # Hijau
             }]
         }
 
     try:
         requests.post(DISCORD_WEBHOOK_URL, json=payload)
-        print(f"[{now}] Pesan terkirim ke Discord.")
+        print(f"[{now}] Pesan terkirim ke Discord (Urgent: {is_urgent})")
     except Exception as e:
         print(f"Error Discord: {e}")
 
 def check_funding():
-    global already_notified
     try:
         response = requests.get(BINANCE_URL)
         data = response.json()
-        
-        current_matches = []
-        new_matches_to_report = []
-        active_symbols = set()
-
+        matches = []
         for item in data:
             if 'lastFundingRate' not in item: continue
-            
             funding_pct = float(item['lastFundingRate']) * 100
-            symbol = item['symbol']
             
-            # Cek jika masuk kriteria ekstrem
-            if funding_pct >= THRESHOLD or funding_pct <= -THRESHOLD:
-                active_symbols.add(symbol)
-                coin_data = {
-                    "symbol": symbol, 
-                    "funding_rate_pct": f"{funding_pct:.4f}%",
-                    "price": f"{float(item.get('mark_price', 0)):,.4f}"
-                }
-                
-                # Cek apakah koin ini BARU (belum ada di list notif sebelumnya)
-                if symbol not in already_notified:
-                    new_matches_to_report.append(coin_data)
-                    already_notified.add(symbol)
-
-        # Bersihkan koin dari memori jika sudah tidak ekstrem lagi (agar bisa di-notif lagi di masa depan)
-        already_notified = already_notified.intersection(active_symbols)
-
-        return new_matches_to_report
+            # Filter: 1% s/d 2% atau -1% s/d -2%
+            if (1.0 <= funding_pct <= 2.0) or (-2.0 <= funding_pct <= -1.0):
+                matches.append({
+                    "symbol": item['symbol'], 
+                    "funding_rate_pct": f"{funding_pct:.4f}%"
+                })
+        return matches
     except Exception as e:
         print(f"Error Binance: {e}")
         return []
 
 if __name__ == "__main__":
-    print(f"=== BOT ANTI-SPAM AKTIF (Threshold: > {THRESHOLD}%) ===")
+    print("=== BOT MONITORING MULTI-INTERVAL AKTIF ===")
+    print("Logika: Cek tiap 2 menit, Laporan rutin tiap 10 menit.")
     
     counter = 0
     while True:
-        # Hanya ambil koin yang BARU masuk kriteria ekstrem
-        koin_baru = check_funding()
+        hasil_scan = check_funding()
         counter += 1
         
-        if koin_baru:
-            send_to_discord(koin_baru, is_urgent=True)
+        # JIKA ADA KOIN (URGENT): Langsung kirim saat itu juga
+        if hasil_scan:
+            send_to_discord(hasil_scan, is_urgent=True)
+            # Opsional: Jika sudah kirim urgent, kita reset counter rutinnya
             counter = 0 
         
-        # Laporan rutin tetap ada setiap 10 menit (5 kali loop * 2 menit)
+        # JIKA TIDAK ADA KOIN (RUTIN): Tunggu sampai 5 kali cek (10 menit)
         elif counter >= 5:
-            # Opsional: Jika ingin benar-benar sepi, matikan fungsi else ini
-            if not already_notified:
-                send_to_discord([], is_urgent=False)
+            send_to_discord([], is_urgent=False)
             counter = 0
         
         else:
             now_log = datetime.now().strftime("%H:%M:%S")
-            print(f"[{now_log}] Monitoring... (Aktif dipantau: {len(already_notified)} koin)")
+            print(f"[{now_log}] Cek ke-{counter}: Nihil. Menunggu 2 menit...")
 
+        # Jeda antar pengecekan (2 menit)
         time.sleep(INTERVAL_CEK)
