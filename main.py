@@ -8,8 +8,8 @@ DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1489799903361372313/vhtf
 
 # Batas notifikasi (0.01 berarti 0.01%)
 # Binance biasanya update funding setiap 8 jam.
-THRESHOLD_POSITIVE = 0.01  
-THRESHOLD_NEGATIVE = -0.01 
+THRESHOLD_POSITIVE = 0.5
+THRESHOLD_NEGATIVE = -0.5
 
 # Cek setiap 10 menit agar tidak kena blokir Binance (600 detik)
 CHECK_INTERVAL = 600 
