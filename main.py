@@ -1,89 +1,98 @@
-import ccxt
+import requests
+import json
 import time
-from discord_webhook import DiscordWebhook, DiscordEmbed
+from datetime import datetime
 
-class JoBtcScanner:
-    def __init__(self):
-        # Inisialisasi Exchange (Gate.io sangat bagus untuk koin ekosistem BTC baru)
-        self.exchange = ccxt.gateio({'enableRateLimit': True})
+# ================= CONFIGURATION =================
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1489799903361372313/vhtfgVrueL8j0ziJB7gwSkTw97gjP4pz5qiajrOsQ_1b7omwWLCraXsFo4l1rlCwsTkX"
+# Mencari koin bertema BTC di DEX
+DEX_SEARCH_URL = "https://api.dexscreener.com/latest/dex/search?q=btc"
+INTERVAL_CEK = 120  # 2 Menit
+MIN_LIQUIDITY = 50000  # Filter Likuiditas minimal $50k (Indikasi holder besar)
+MAX_PRICE = 0.01
+
+# Untuk menghindari spam, kita simpan list koin yang sudah di-alert
+alerted_coins = {}
+
+def send_to_discord(matches, is_status=False):
+    now = datetime.now().strftime("%H:%M:%S")
+    if is_status:
+        payload = {
+            "embeds": [{
+                "description": f"✅ **Status Scan DEX {now}:** Menunggu koin potensial...",
+                "color": 8421504
+            }]
+        }
+    else:
+        fields = []
+        for coin in matches:
+            fields.append({
+                "name": f"🚀 {coin['symbol']} ({coin['chain']})",
+                "value": f"Price: `${coin['price']}`\nLiq: `${coin['liq']:,.0f}`\n[Chart]({coin['url']})",
+                "inline": True
+            })
         
-        # URL Webhook yang kamu berikan
-        self.webhook_url = "https://discord.com/api/webhooks/1489799903361372313/vhtfgVrueL8j0ziJB7gwSkTw97gjP4pz5qiajrOsQ_1b7omwWLCraXsFo4l1rlCwsTkX"
+        payload = {
+            "username": "Jo DEX Monitor",
+            "embeds": [{
+                "title": "🚨 NEW DEX POTENTIAL!",
+                "color": 15105570,
+                "fields": fields,
+                "footer": {"text": "Berdasarkan kriteria Harga Minim & Liq Besar"}
+            }]
+        }
+
+    try:
+        requests.post(DISCORD_WEBHOOK_URL, json=payload)
+    except Exception as e:
+        print(f"Error Discord: {e}")
+
+def scan_dex():
+    matches = []
+    try:
+        response = requests.get(DEX_SEARCH_URL)
+        data = response.json()
+        pairs = data.get('pairs', [])
         
-        # Parameter Filter
-        self.keywords = ['btc', 'bitcoin', 'satoshi', 'ordi', 'sats', 'merl', 'stx']
-        self.max_price = 0.01          # Harga masih minim/murah
-        self.min_volume_24h = 50000    # Indikasi holder/aktivitas besar ($50k+)
-        
-        # Kontrol Notifikasi
-        self.alert_history = {}        # Melacak jumlah alert per koin
-        self.last_status_time = time.time()
-        self.scan_interval = 120       # 2 menit
-        self.status_interval = 300     # 5 menit
+        for pair in pairs:
+            symbol = pair['baseToken']['symbol']
+            price = float(pair.get('priceUsd', 0))
+            liq = pair.get('liquidity', {}).get('usd', 0)
+            chain = pair.get('chainId', 'unknown')
+            pair_address = pair.get('pairAddress')
 
-    def send_to_discord(self, title, message, color="f2a900"):
-        try:
-            webhook = DiscordWebhook(url=self.webhook_url)
-            embed = DiscordEmbed(title=title, description=message, color=color)
-            embed.set_timestamp()
-            webhook.add_embed(embed)
-            webhook.execute()
-        except Exception as e:
-            print(f"Gagal kirim ke Discord: {e}")
-
-    def run_scan(self):
-        print(f"[{time.strftime('%H:%M:%S')}] Memindai market...")
-        try:
-            tickers = self.exchange.fetch_tickers()
-            found_any = False
-
-            for symbol, data in tickers.items():
-                # Filter hanya pasangan USDT
-                if '/USDT' in symbol:
-                    base = symbol.split('/')[0].lower()
-                    price = data.get('last', 0)
-                    volume = data.get('quoteVolume', 0)
-
-                    # Logika: Nama mengandung unsur BTC + Harga Murah + Volume Cukup
-                    if any(key in base for key in self.keywords):
-                        if 0 < price <= self.max_price and volume >= self.min_volume_24h:
-                            
-                            # Limit Maksimal 3x Notifikasi per koin
-                            count = self.alert_history.get(symbol, 0)
-                            if count < 3:
-                                self.alert_history[symbol] = count + 1
-                                found_any = True
-                                
-                                content = (
-                                    f"**Koin:** {symbol}\n"
-                                    f"**Harga:** {price:.8f}\n"
-                                    f"**Volume 24h:** ${volume:,.2f}\n"
-                                    f"**Notifikasi:** {self.alert_history[symbol]}/3"
-                                )
-                                self.send_to_discord(f"🚀 Potensi BTC-Proxy Terdeteksi!", content)
-                                print(f"✅ Alert dikirim: {symbol}")
-            
-            return found_any
-
-        except Exception as e:
-            print(f"Error saat scan: {e}")
-            return False
-
-    def start(self):
-        print("Bot Jo BTC Scanner Aktif...")
-        while True:
-            found = self.run_scan()
-            current_time = time.time()
-
-            # Jika tidak ada koin baru, kirim status setiap 5 menit agar tahu bot tidak mati
-            if not found:
-                if current_time - self.last_status_time >= self.status_interval:
-                    self.send_to_discord("📡 Status Bot", "Bot aktif memantau, belum ada koin baru sesuai kriteria.", color="808080")
-                    self.last_status_time = current_time
-                    print("📢 Mengirim status report ke Discord.")
-
-            time.sleep(self.scan_interval)
+            # Filter Logika
+            if price <= MAX_PRICE and liq >= MIN_LIQUIDITY:
+                # Limit 3x alert per koin (menggunakan pairAddress sebagai ID unik)
+                count = alerted_coins.get(pair_address, 0)
+                if count < 3:
+                    alerted_coins[pair_address] = count + 1
+                    matches.append({
+                        "symbol": symbol,
+                        "price": price,
+                        "liq": liq,
+                        "chain": chain,
+                        "url": pair['url']
+                    })
+        return matches
+    except Exception as e:
+        print(f"Error API: {e}")
+        return []
 
 if __name__ == "__main__":
-    bot = JoBtcScanner()
-    bot.start()
+    print("=== DEX MONITORING AKTIF ===")
+    counter = 0
+    while True:
+        hasil = scan_dex()
+        counter += 1
+        
+        if hasil:
+            send_to_discord(hasil)
+        
+        # Laporan rutin setiap 5 menit (sekitar 3x loop jika interval 120s)
+        if counter >= 3:
+            if not hasil:
+                send_to_discord([], is_status=True)
+            counter = 0
+
+        time.sleep(INTERVAL_CEK)
